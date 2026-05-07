@@ -13,7 +13,6 @@ use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 
 use super::{SandboxPermissions, SandboxPolicy};
-use crate::utils::fuse;
 
 pub const LIBRA_SANDBOX_NETWORK_DISABLED_ENV_VAR: &str = "LIBRA_SANDBOX_NETWORK_DISABLED";
 const CARGO_TARGET_DIR_ENV_VAR: &str = "CARGO_TARGET_DIR";
@@ -102,16 +101,29 @@ fn apply_fuse_workspace_env_overrides(
     env: &mut HashMap<String, String>,
     ambient_cargo_target_dir_is_set: bool,
 ) {
-    if env.contains_key(CARGO_TARGET_DIR_ENV_VAR) || ambient_cargo_target_dir_is_set {
+    #[cfg(not(unix))]
+    {
+        let _ = cwd;
+        let _ = env;
+        let _ = ambient_cargo_target_dir_is_set;
         return;
     }
-    let Some(target_dir) = fuse::fuse_workspace_cargo_target_dir(cwd) else {
-        return;
-    };
-    env.insert(
-        CARGO_TARGET_DIR_ENV_VAR.to_string(),
-        target_dir.to_string_lossy().into_owned(),
-    );
+
+    #[cfg(unix)]
+    {
+        use crate::utils::fuse;
+
+        if env.contains_key(CARGO_TARGET_DIR_ENV_VAR) || ambient_cargo_target_dir_is_set {
+            return;
+        }
+        let Some(target_dir) = fuse::fuse_workspace_cargo_target_dir(cwd) else {
+            return;
+        };
+        env.insert(
+            CARGO_TARGET_DIR_ENV_VAR.to_string(),
+            target_dir.to_string_lossy().into_owned(),
+        );
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -546,6 +558,7 @@ mod tests {
         assert!(!spec.program.is_empty());
     }
 
+    #[cfg(unix)]
     #[test]
     fn apply_fuse_workspace_env_overrides_sets_cargo_target_dir_inside_fuse_worktree() {
         let cwd =
@@ -596,6 +609,7 @@ mod tests {
         assert!(env.is_empty());
     }
 
+    #[cfg(unix)]
     #[test]
     fn shell_command_spec_injects_cargo_target_dir_inside_fuse_workspace() {
         // Production wrapper test: drives the inner constructor with an
